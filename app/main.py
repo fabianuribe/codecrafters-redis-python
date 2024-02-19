@@ -1,6 +1,34 @@
 import socket
 import threading
 
+def parse_command(command: str) -> list[str]:
+    parsed_command = []
+    command_type = command[0]
+    parts = command[1:].split("\r\n");
+
+    # Arrays
+    if command_type == "*":
+        item_count = int(parts[0])
+        slice_start = 2
+        slice_end = slice_start + item_count + 1
+        parsed_command.extend(parts[slice_start:slice_end:2])
+
+    return parsed_command
+
+def encode_response(response: list[str], type: str) -> bytes:
+    new_line = '\r\n'
+    res = ""
+    if type == "simple":
+        res = f"+{response[0]}"
+    else:
+        response_parts = []
+        for part in response:
+            response_parts.append(len(part))
+            response_parts.append(part)
+        res = f"${new_line.join(str(part) for part in response_parts)}"
+
+    return f"{res}{new_line}".encode("utf-8")
+
 def handle_client_connection(conn, address):
     try:
         while True:
@@ -8,8 +36,21 @@ def handle_client_connection(conn, address):
             if not data:
                 break
 
-            if "ping" in data:
-                conn.send(b"+PONG\r\n")
+            command_parts = parse_command(data)
+
+            if len(command_parts) == 0:
+                break;
+
+            command =  command_parts[0].lower()
+            arguments = command_parts[1:]
+
+            if command == "ping" :
+                conn.send(encode_response(["PONG"], "simple"))
+
+            elif command == "echo" :
+                conn.send(encode_response(arguments, "bulk"))
+            else:
+                raise ValueError(f"Unsupported command: {command}")
 
     except ValueError as e:
         print(e)
