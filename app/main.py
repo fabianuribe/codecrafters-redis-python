@@ -1,5 +1,6 @@
 import socket
 import threading
+from datetime import datetime, timedelta
 
 db = {}
 
@@ -32,11 +33,18 @@ def encode_response(response: list[str], type: str) -> bytes:
 
     return f"{res}{new_line}".encode("utf-8")
 
-def set_db_item(key, value): 
-    db[key] = value
+def calculate_expiry(milliseconds: int):
+    return datetime.now() + timedelta(milliseconds=milliseconds)
+
+def is_expired(item: tuple):
+    return item[1] != None and datetime.now() > item[1]
+
+def set_db_item(key, value, px = -1):
+    expiry = calculate_expiry(px) if px >= 0 else None
+    db[key] = (value, expiry)
 
 def get_db_item(key): 
-    return db[key] if key in db else None
+    return db[key] if key in db and not is_expired(db[key]) else None
 
 def handle_client_connection(conn, address):
     try:
@@ -60,12 +68,13 @@ def handle_client_connection(conn, address):
                 conn.send(encode_response(arguments, "bulk"))
 
             elif command == "set" :
-                set_db_item(arguments[0], arguments[1])
+                px = int(arguments[3]) if (len(arguments) >= 4 and arguments[2].lower() == "px") else -1
+                set_db_item(arguments[0], arguments[1], px)
                 conn.send(encode_response(["OK"], "simple"))
 
             elif command == "get" :
                 value = get_db_item(arguments[0])
-                conn.send(encode_response([value] if value else [], "bulk"))
+                conn.send(encode_response([value[0]] if value else [], "bulk"))
 
             else:
                 raise ValueError(f"Unsupported command: {command}")
