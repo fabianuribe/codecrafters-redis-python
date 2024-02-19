@@ -5,17 +5,15 @@ from datetime import datetime, timedelta
 db = {}
 
 def parse_command(command: str) -> list[str]:
-    parsed_command = []
-    command_type = command[0]
-    parts = command[1:].split("\r\n");
+    """Parses a Redis command and returns the components."""
+    if command.startswith("*"):
+        parts = command[1:].split("\r\n");
+        return parts[2::2] # Skip every other element starting from the third
 
-    # Arrays
-    if command_type == "*":
-        parsed_command.extend(parts[2::2])
-
-    return parsed_command
+    return []
 
 def encode_response(response: list[str], type: str) -> bytes:
+    """Encodes a response based on the response type."""
     new_line = '\r\n'
     res = ""
     if type == "simple":
@@ -33,20 +31,25 @@ def encode_response(response: list[str], type: str) -> bytes:
 
     return f"{res}{new_line}".encode("utf-8")
 
-def calculate_expiry(milliseconds: int):
+def calculate_expiry(milliseconds: int) -> datetime:
+    """Calculates the expiry time from now."""
     return datetime.now() + timedelta(milliseconds=milliseconds)
 
-def is_expired(item: tuple):
+def is_expired(item: tuple) -> bool:
+    """Checks if an item has expired."""
     return item[1] != None and datetime.now() > item[1]
 
-def set_db_item(key, value, px = -1):
+def set_db_item(key: str, value: str, px: int = -1):
+    """Sets an item in the database with optional expiry."""
     expiry = calculate_expiry(px) if px >= 0 else None
     db[key] = (value, expiry)
 
-def get_db_item(key): 
+def get_db_item(key) -> tuple | None: 
+    """Retrieves an item from the database if not expired."""
     return db[key] if key in db and not is_expired(db[key]) else None
 
 def handle_client_connection(conn, address):
+    """Handles a client connection, processing commands."""
     try:
         while True:
             data = conn.recv(1024).decode("utf-8")
@@ -54,7 +57,6 @@ def handle_client_connection(conn, address):
                 break
 
             command_parts = parse_command(data)
-
             if len(command_parts) == 0:
                 break;
 
@@ -63,37 +65,28 @@ def handle_client_connection(conn, address):
 
             if command == "ping" :
                 conn.send(encode_response(["PONG"], "simple"))
-
             elif command == "echo" :
                 conn.send(encode_response(arguments, "bulk"))
-
             elif command == "set" :
                 px = int(arguments[3]) if (len(arguments) >= 4 and arguments[2].lower() == "px") else -1
                 set_db_item(arguments[0], arguments[1], px)
                 conn.send(encode_response(["OK"], "simple"))
-
             elif command == "get" :
                 value = get_db_item(arguments[0])
                 conn.send(encode_response([value[0]] if value else [], "bulk"))
-
             else:
                 raise ValueError(f"Unsupported command: {command}")
 
     except ValueError as e:
-        print(e)
-        conn.close()
+        print(f"Error handling client {address}: {e}")
 
 def main():
-    server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
-    server_socket.listen()
-
-    while True:
-        conn, address = server_socket.accept() 
-        client_thread = threading.Thread(
-            target=handle_client_connection, args=(conn, address)
-        )
-        client_thread.start()
-
+    with socket.create_server(("localhost", 6379), reuse_port=True) as server_socket:
+        server_socket.listen()
+        print("Server listening on localhost:6379")
+        while True:
+            conn, address = server_socket.accept()
+            threading.Thread(target=handle_client_connection, args=(conn, address)).start()
 
 if __name__ == "__main__":
     main()
