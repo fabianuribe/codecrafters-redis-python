@@ -1,6 +1,8 @@
 import socket
 import threading
 
+db = {}
+
 def parse_command(command: str) -> list[str]:
     parsed_command = []
     command_type = command[0]
@@ -8,10 +10,7 @@ def parse_command(command: str) -> list[str]:
 
     # Arrays
     if command_type == "*":
-        item_count = int(parts[0])
-        slice_start = 2
-        slice_end = slice_start + item_count + 1
-        parsed_command.extend(parts[slice_start:slice_end:2])
+        parsed_command.extend(parts[2::2])
 
     return parsed_command
 
@@ -22,12 +21,22 @@ def encode_response(response: list[str], type: str) -> bytes:
         res = f"+{response[0]}"
     else:
         response_parts = []
-        for part in response:
-            response_parts.append(len(part))
-            response_parts.append(part)
+        if len(response) == 0:
+            response_parts.append(-1)
+        else:
+            for part in response:
+                response_parts.append(len(part))
+                response_parts.append(part)
+
         res = f"${new_line.join(str(part) for part in response_parts)}"
 
     return f"{res}{new_line}".encode("utf-8")
+
+def set_db_item(key, value): 
+    db[key] = value
+
+def get_db_item(key): 
+    return db[key] if key in db else None
 
 def handle_client_connection(conn, address):
     try:
@@ -49,6 +58,15 @@ def handle_client_connection(conn, address):
 
             elif command == "echo" :
                 conn.send(encode_response(arguments, "bulk"))
+
+            elif command == "set" :
+                set_db_item(arguments[0], arguments[1])
+                conn.send(encode_response(["OK"], "simple"))
+
+            elif command == "get" :
+                value = get_db_item(arguments[0])
+                conn.send(encode_response([value] if value else [], "bulk"))
+
             else:
                 raise ValueError(f"Unsupported command: {command}")
 
