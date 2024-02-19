@@ -9,7 +9,7 @@ def handle_client_connection(conn, address):
                 break
 
             if "ping" in data:
-                conn.sendall(b"+PONG\r\n")
+                conn.send(b"+PONG\r\n")
 
     except ValueError as e:
         print(e)
