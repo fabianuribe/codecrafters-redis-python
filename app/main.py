@@ -1,15 +1,26 @@
-# Uncomment this to pass the first stage
 import socket
+import threading
 
+def handle_client_connection(conn):
+    try:
+        data = conn.recv(1024).decode("utf-8")
+        if "ping" in data:
+            conn.send(b"+PONG\r\n")
+
+    except ValueError as e:
+        print(e)
+        conn.close();
 
 def main():
-    # You can use print statements as follows for debugging, they'll be visible when running tests.
-    print("Logs from your program will appear here!")
-
-    # Uncomment this to pass the first stage
-    #
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
-    server_socket.accept() # wait for client
+    server_socket.listen()
+
+    while True:
+        conn = server_socket.accept() 
+        client_thread = threading.Thread(
+            target=handle_client_connection, args=(conn)
+        )
+        client_thread.start()
 
 
 if __name__ == "__main__":
