@@ -1,7 +1,7 @@
 import socket
 import threading
 
-def handle_client_connection(conn):
+def handle_client_connection(conn, address):
     try:
         data = conn.recv(1024).decode("utf-8")
         if "ping" in data:
@@ -16,9 +16,9 @@ def main():
     server_socket.listen()
 
     while True:
-        conn = server_socket.accept() 
+        conn, address = server_socket.accept() 
         client_thread = threading.Thread(
-            target=handle_client_connection, args=(conn)
+            target=handle_client_connection, args=(conn, address)
         )
         client_thread.start()
 
