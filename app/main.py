@@ -3,13 +3,17 @@ import threading
 
 def handle_client_connection(conn, address):
     try:
-        data = conn.recv(1024).decode("utf-8")
-        if "ping" in data:
-            conn.send(b"+PONG\r\n")
+        while True:
+            data = conn.recv(1024).decode("utf-8")
+            if not data:
+                break
+
+            if "ping" in data:
+                conn.sendall(b"+PONG\r\n")
 
     except ValueError as e:
         print(e)
-        conn.close();
+        conn.close()
 
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
