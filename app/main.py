@@ -15,6 +15,29 @@ parser = argparse.ArgumentParser(description='Example script to take a port argu
 parser.add_argument('--port', type=int, help='The port number to use.', default=6379)
 parser.add_argument('--replicaof', type=str, nargs=2, help='The master host and master port for the replica.')
 
+def connect_to_master(host, port):
+    """stablishes connection with master"""
+    # Create a TCP/IP socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    try:
+        # Connect the socket to the server's port
+        server_address = (host, int(port))
+        print(f'Connecting to master on {host} port {port}')
+        sock.connect(server_address)
+
+        # Send PING
+        print(f'Sending: PING')
+        sock.sendall(encode_message(["PING"], "array"))
+
+        # Look for the response (optional)
+        response = sock.recv(4096)
+        print(f'Received: {response.decode()}')  # Decode bytes to string
+
+    finally:
+        # Clean up the connection
+        sock.close()
+
 def parse_command(command: str) -> list[str]:
     """Parses a Redis command and returns the components."""
     if command.startswith("*"):
@@ -23,24 +46,34 @@ def parse_command(command: str) -> list[str]:
 
     return []
 
-def encode_response(response: list[str], type: str) -> bytes:
+def encode_message(message: list[str], type: str) -> bytes:
     """Encodes a response based on the response type."""
     new_line = '\r\n'
-    res = ""
+    msg = ""
     if type == "simple":
-        res = f"+{response[0]}"
-    else:
-        response_parts = []
-        if len(response) == 0:
-            response_parts.append(-1)
+        msg = f"+{message[0]}"
+    elif type == "array":
+        message_parts = []
+        if len(message) == 0:
+            message_parts.append(-1)
         else:
-            for part in response:
-                response_parts.append(len(part))
-                response_parts.append(part)
+            for part in message:
+                message_parts.append(f"${len(part)}")
+                message_parts.append(part)
 
-        res = f"${new_line.join(str(part) for part in response_parts)}"
+        msg = f"*{len(message)}{new_line}{new_line.join(str(part) for part in message_parts)}"
+    else:
+        message_parts = []
+        if len(message) == 0:
+            message_parts.append(-1)
+        else:
+            for part in message:
+                message_parts.append(len(part))
+                message_parts.append(part)
 
-    return f"{res}{new_line}".encode("utf-8")
+        msg = f"${new_line.join(str(part) for part in message_parts)}"
+
+    return f"{msg}{new_line}".encode("utf-8")
 
 def calculate_expiry(milliseconds: int) -> datetime:
     """Calculates the expiry time from now."""
@@ -79,19 +112,24 @@ def handle_client_connection(conn, address):
             arguments = command_parts[1:]
 
             if command == "ping" :
-                conn.send(encode_response(["PONG"], "simple"))
+                print(f"PING from {address}")
+                conn.send(encode_message(["PONG"], "simple"))
             elif command == "info" :
+                print(f"INFO from {address}")
                 if len(arguments) and arguments[0].lower() == "replication":
-                    conn.send(encode_response([get_replication_info()], "bulk"))
+                    conn.send(encode_message([get_replication_info()], "bulk"))
             elif command == "echo" :
-                conn.send(encode_response(arguments, "bulk"))
+                print(f"ECHO from {address}")
+                conn.send(encode_message(arguments, "bulk"))
             elif command == "set" :
+                print(f"SET from {address}")
                 px = int(arguments[3]) if (len(arguments) >= 4 and arguments[2].lower() == "px") else -1
                 set_db_item(arguments[0], arguments[1], px)
-                conn.send(encode_response(["OK"], "simple"))
+                conn.send(encode_message(["OK"], "simple"))
             elif command == "get" :
+                print(f"GET from {address}")
                 value = get_db_item(arguments[0])
-                conn.send(encode_response([value[0]] if value else [], "bulk"))
+                conn.send(encode_message([value[0]] if value else [], "bulk"))
             else:
                 raise ValueError(f"Unsupported command: {command}")
 
@@ -106,6 +144,7 @@ def main():
         master_host, master_port = args.replicaof
         replication["role"] = "slave"
         print(f"Configured as slave of: {master_host}:{master_port}")
+        connect_to_master(master_host, master_port)
 
     with socket.create_server(("localhost", port), reuse_port=True) as server_socket:
         server_socket.listen()
