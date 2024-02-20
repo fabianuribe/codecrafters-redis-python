@@ -42,6 +42,10 @@ def connect_to_master(host: str, host_port: int, self_port: int):
         response = sock.recv(4096)
         print(f'Received: {response.decode()}')  # Decode bytes to string
 
+        sock.sendall(encode_message(["PSYNC", "?", "-1"], "array"))
+        response = sock.recv(4096)
+        print(f'Received: {response.decode()}')  # Decode bytes to string
+
     finally:
         # Clean up the connection
         sock.close()
@@ -125,6 +129,9 @@ def handle_client_connection(conn, address):
             elif command == "replconf" :
                 print(f"REPLCONF ({arguments[0]}) from {address}")
                 conn.send(encode_message(["OK"], "simple"))
+            elif command == "psync" :
+                print(f"PSYNC from {address}")
+                conn.send(encode_message(["FULLRESYNC <REPL_ID> 0"] , "simple"))
             elif command == "info" :
                 print(f"INFO from {address}")
                 if len(arguments) and arguments[0].lower() == "replication":
