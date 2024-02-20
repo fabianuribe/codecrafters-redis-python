@@ -15,15 +15,15 @@ parser = argparse.ArgumentParser(description='Example script to take a port argu
 parser.add_argument('--port', type=int, help='The port number to use.', default=6379)
 parser.add_argument('--replicaof', type=str, nargs=2, help='The master host and master port for the replica.')
 
-def connect_to_master(host, port):
+def connect_to_master(host: str, host_port: int, self_port: int):
     """stablishes connection with master"""
     # Create a TCP/IP socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     try:
         # Connect the socket to the server's port
-        server_address = (host, int(port))
-        print(f'Connecting to master on {host} port {port}')
+        server_address = (host, host_port)
+        print(f'Connecting to master on {host} port {host_port}')
         sock.connect(server_address)
 
         # Send PING
@@ -31,6 +31,14 @@ def connect_to_master(host, port):
         sock.sendall(encode_message(["PING"], "array"))
 
         # Look for the response (optional)
+        response = sock.recv(4096)
+        print(f'Received: {response.decode()}')  # Decode bytes to string
+
+        sock.sendall(encode_message(["REPLCONF", "listening-port", str(self_port)], "array"))
+        response = sock.recv(4096)
+        print(f'Received: {response.decode()}')  # Decode bytes to string
+
+        sock.sendall(encode_message(["REPLCONF", "capa", "psync2"], "array"))
         response = sock.recv(4096)
         print(f'Received: {response.decode()}')  # Decode bytes to string
 
@@ -114,6 +122,9 @@ def handle_client_connection(conn, address):
             if command == "ping" :
                 print(f"PING from {address}")
                 conn.send(encode_message(["PONG"], "simple"))
+            elif command == "replconf" :
+                print(f"REPLCONF ({arguments[0]}) from {address}")
+                conn.send(encode_message(["OK"], "simple"))
             elif command == "info" :
                 print(f"INFO from {address}")
                 if len(arguments) and arguments[0].lower() == "replication":
@@ -144,7 +155,7 @@ def main():
         master_host, master_port = args.replicaof
         replication["role"] = "slave"
         print(f"Configured as slave of: {master_host}:{master_port}")
-        connect_to_master(master_host, master_port)
+        connect_to_master(master_host, int(master_port), int(port))
 
     with socket.create_server(("localhost", port), reuse_port=True) as server_socket:
         server_socket.listen()
