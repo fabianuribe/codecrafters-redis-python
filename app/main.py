@@ -7,7 +7,7 @@ db = {}
 replication = {
     "role": "master",
     "connected_slaves": 0,
-    "master_replid": "aeiou",
+    "master_replid": "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
     "master_repl_offset": 0
 }
 
@@ -105,7 +105,7 @@ def main():
     if args.replicaof:
         master_host, master_port = args.replicaof
         replication["role"] = "slave"
-        replication["master_replid"] = f"{master_host}:{master_port}"
+        print(f"Configured as slave of: {master_host}:{master_port}")
 
     with socket.create_server(("localhost", port), reuse_port=True) as server_socket:
         server_socket.listen()
