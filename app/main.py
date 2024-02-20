@@ -13,6 +13,7 @@ replication = {
 
 parser = argparse.ArgumentParser(description='Example script to take a port argument.')
 parser.add_argument('--port', type=int, help='The port number to use.', default=6379)
+parser.add_argument('--replicaof', type=str, nargs=2, help='The master host and master port for the replica.')
 
 def parse_command(command: str) -> list[str]:
     """Parses a Redis command and returns the components."""
@@ -100,6 +101,11 @@ def handle_client_connection(conn, address):
 def main():
     args = parser.parse_args()
     port = args.port or 6379
+
+    if args.replicaof:
+        master_host, master_port = args.replicaof
+        replication["role"] = "slave"
+        replication["master_replid"] = f"{master_host}:{master_port}"
 
     with socket.create_server(("localhost", port), reuse_port=True) as server_socket:
         server_socket.listen()
