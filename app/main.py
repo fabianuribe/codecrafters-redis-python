@@ -4,6 +4,12 @@ import threading
 from datetime import datetime, timedelta
 
 db = {}
+replication = {
+    "role": "master",
+    "connected_slaves": 0,
+    "master_replid": "aeiou",
+    "master_repl_offset": 0
+}
 
 parser = argparse.ArgumentParser(description='Example script to take a port argument.')
 parser.add_argument('--port', type=int, help='The port number to use.', default=6379)
@@ -52,6 +58,10 @@ def get_db_item(key) -> tuple | None:
     """Retrieves an item from the database if not expired."""
     return db[key] if key in db and not is_expired(db[key]) else None
 
+def get_replication_info() -> str:
+    """Retrieves the instances replication information."""
+    return "\n".join(["# Replication"] +[f'{key}:{value}' for key, value in replication.items()])
+
 def handle_client_connection(conn, address):
     """Handles a client connection, processing commands."""
     try:
@@ -69,6 +79,9 @@ def handle_client_connection(conn, address):
 
             if command == "ping" :
                 conn.send(encode_response(["PONG"], "simple"))
+            elif command == "info" :
+                if len(arguments) and arguments[0].lower() == "replication":
+                    conn.send(encode_response([get_replication_info()], "bulk"))
             elif command == "echo" :
                 conn.send(encode_response(arguments, "bulk"))
             elif command == "set" :
