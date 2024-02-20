@@ -1,8 +1,12 @@
+import argparse
 import socket
 import threading
 from datetime import datetime, timedelta
 
 db = {}
+
+parser = argparse.ArgumentParser(description='Example script to take a port argument.')
+parser.add_argument('--port', type=int, help='The port number to use.', default=6379)
 
 def parse_command(command: str) -> list[str]:
     """Parses a Redis command and returns the components."""
@@ -81,9 +85,12 @@ def handle_client_connection(conn, address):
         print(f"Error handling client {address}: {e}")
 
 def main():
-    with socket.create_server(("localhost", 6379), reuse_port=True) as server_socket:
+    args = parser.parse_args()
+    port = args.port or 6379
+
+    with socket.create_server(("localhost", port), reuse_port=True) as server_socket:
         server_socket.listen()
-        print("Server listening on localhost:6379")
+        print(f"Server listening on localhost:{port}")
         while True:
             conn, address = server_socket.accept()
             threading.Thread(target=handle_client_connection, args=(conn, address)).start()
