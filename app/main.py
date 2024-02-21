@@ -38,7 +38,7 @@ def connect_to_master(host: str, host_port: int, self_port: int):
         response = sock.recv(4096)
         print(f'Received: {response.decode()}')  # Decode bytes to string
 
-        sock.sendall(encode_message(["REPLCONF", "capa", "psync2"], "array"))
+        sock.sendall(encode_message(["REPLCONF", "capa", "eof", "capa", "psync2"], "array"))
         response = sock.recv(4096)
         print(f'Received: {response.decode()}')  # Decode bytes to string
 
