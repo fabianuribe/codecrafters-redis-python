@@ -131,7 +131,7 @@ def handle_client_connection(conn, address):
                 conn.send(encode_message(["OK"], "simple"))
             elif command == "psync" :
                 print(f"PSYNC from {address}")
-                conn.send(encode_message(["FULLRESYNC <REPL_ID> 0"] , "simple"))
+                conn.send(encode_message([f"FULLRESYNC {replication['master_replid']} 0"] , "simple"))
             elif command == "info" :
                 print(f"INFO from {address}")
                 if len(arguments) and arguments[0].lower() == "replication":
