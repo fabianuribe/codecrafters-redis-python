@@ -1,7 +1,10 @@
 import argparse
+import base64
 import socket
 import threading
 from datetime import datetime, timedelta
+
+EMPTY_RDB_FILE = "UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog=="
 
 db = {}
 replication = {
@@ -44,7 +47,7 @@ def connect_to_master(host: str, host_port: int, self_port: int):
 
         sock.sendall(encode_message(["PSYNC", "?", "-1"], "array"))
         response = sock.recv(4096)
-        print(f'Received: {response.decode()}')  # Decode bytes to string
+        print(f'Received: {response}')  # Decode bytes to string
 
     finally:
         # Clean up the connection
@@ -86,6 +89,15 @@ def encode_message(message: list[str], type: str) -> bytes:
         msg = f"${new_line.join(str(part) for part in message_parts)}"
 
     return f"{msg}{new_line}".encode("utf-8")
+
+def encode_file(file: bytes) -> bytes:
+    """Encodes file for transmission via the RESP protocol."""
+    new_line = '\r\n'
+    return f"${len(file)}{new_line}".encode("utf-8") + file
+
+def construct_rdb() -> bytes:
+    """Constructs a binary RDB reperesentation of the current state of the replica"""
+    return base64.b64decode(EMPTY_RDB_FILE)
 
 def calculate_expiry(milliseconds: int) -> datetime:
     """Calculates the expiry time from now."""
@@ -131,7 +143,8 @@ def handle_client_connection(conn, address):
                 conn.send(encode_message(["OK"], "simple"))
             elif command == "psync" :
                 print(f"PSYNC from {address}")
-                conn.send(encode_message([f"FULLRESYNC {replication['master_replid']} 0"] , "simple"))
+                conn.sendall(encode_message([f"FULLRESYNC {replication['master_replid']} 0"] , "simple"))
+                conn.sendall(encode_file(construct_rdb()))
             elif command == "info" :
                 print(f"INFO from {address}")
                 if len(arguments) and arguments[0].lower() == "replication":
