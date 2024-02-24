@@ -31,6 +31,8 @@ def encode_message(message: list[str], type: str) -> bytes:
     msg = ""
     if type == "simple":
         msg = f"+{message[0]}"
+    elif type == "integer":
+        msg = f":{message[0]}"
     elif type == "array":
         message_parts = []
         if len(message) == 0:
@@ -142,6 +144,8 @@ def handle_command(resp: str, conn, address, silentMode=False):
         propagate_command(resp)
         if not silentMode:
             conn.send(encode_message(["OK"], "simple"))
+    elif command == "wait":
+        conn.send(encode_message(["0"], "integer"))
     elif command == "get" :
         value = get_db_item(arguments[0])
         conn.send(encode_message([value[0]] if value else [], "bulk"))
