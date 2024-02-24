@@ -117,13 +117,12 @@ def handle_command(resp: str, conn, address, silentMode=False):
     print(f"{command.upper()} from {address}")
 
     if command == "ping" :
-        conn.send(encode_message(["PONG"], "simple"))
+        if not silentMode:
+            conn.send(encode_message(["PONG"], "simple"))
     elif command == "replconf" :
         if arguments[0].lower() == "getack":
-            if arguments[1].lower() == "*":
-                conn.send(encode_message(["REPLCONF", "ACK", "0"], "array"))
-            else: 
-                conn.send(encode_message(["OK"], "simple"))
+            print(encode_message(["REPLCONF", "ACK", str(replication["master_repl_offset"])], "array"))
+            conn.send(encode_message(["REPLCONF", "ACK", str(replication["master_repl_offset"])], "array"))
         elif arguments[0].lower() == "listening-port":
             register_replica(Replica(host=address[0], port=int(arguments[1]), connection=conn))
             conn.send(encode_message(["OK"], "simple"))
@@ -153,11 +152,16 @@ def handle_command(resp: str, conn, address, silentMode=False):
 def handle_client_connection(conn, address):
     """Handles a client connection, processing commands."""
     try:
+        buffer = ""
         while True:
-            resp = conn.recv(1024).decode("utf-8")
+            resp = conn.recv(1024)
             if not resp:
                 break
-            handle_command(resp, conn, address)
+            buffer += resp.decode("utf-8")
+
+            commands, buffer = split_commands(buffer)
+            for cmd in commands:
+                handle_command(cmd, conn, address)
 
     except ValueError as e:
         print(f"Error handling client {address}: {e}")
@@ -295,7 +299,7 @@ def start_replication(host: str, host_port: int, self_port: int):
         while sock:
             ready_to_read, _, _ = select.select([sock], [], [], 5)
             if ready_to_read:
-                response = sock.recv(4096)
+                response = sock.recv(1024)
                 if not response:
                     break  # Connection closed by the master
                 buffer += response.decode("utf-8")
@@ -304,6 +308,8 @@ def start_replication(host: str, host_port: int, self_port: int):
                 commands, buffer = split_commands(buffer)
                 for cmd in commands:
                     handle_command(cmd, sock, (host, host_port), True)
+                    num_bytes = len(cmd.encode("utf-8"))
+                    replication["master_repl_offset"] += num_bytes
 
     except Exception as e:
         print(f"Replication Ended")
