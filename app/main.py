@@ -145,6 +145,7 @@ def handle_command(resp: str, conn, address, silentMode=False):
         if not silentMode:
             conn.send(encode_message(["OK"], "simple"))
     elif command == "wait":
+        count = int(arguments[0]) if len(arguments) else 0
         conn.send(encode_message(["0"], "integer"))
     elif command == "get" :
         value = get_db_item(arguments[0])
