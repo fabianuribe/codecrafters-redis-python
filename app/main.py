@@ -119,9 +119,16 @@ def handle_command(resp: str, conn, address, silentMode=False):
     if command == "ping" :
         conn.send(encode_message(["PONG"], "simple"))
     elif command == "replconf" :
-        if arguments[0].lower() == "listening-port":
+        if arguments[0].lower() == "getack":
+            if arguments[1].lower() == "*":
+                conn.send(encode_message(["REPLCONF", "ACK", "0"], "array"))
+            else: 
+                conn.send(encode_message(["OK"], "simple"))
+        elif arguments[0].lower() == "listening-port":
             register_replica(Replica(host=address[0], port=int(arguments[1]), connection=conn))
-        conn.send(encode_message(["OK"], "simple"))
+            conn.send(encode_message(["OK"], "simple"))
+        else:
+            conn.send(encode_message(["OK"], "simple"))
     elif command == "psync" :
         conn.sendall(encode_message([f"FULLRESYNC {replication['master_replid']} 0"] , "simple"))
         conn.sendall(encode_file(construct_rdb()))
