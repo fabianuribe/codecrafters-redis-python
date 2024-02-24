@@ -5,7 +5,6 @@ import socket
 import threading
 from datetime import datetime, timedelta
 import select
-import time
 
 Replica = namedtuple('Replica', ['host', 'port', 'connection'])
 
@@ -106,7 +105,7 @@ def propagate_command(command):
                 print(f"Error propagating to {replica.host}:{replica.port} : {e}")
                 remove_replica(replica)
 
-def handle_command(resp: str, conn, address):
+def handle_command(resp: str, conn, address, silentMode=False):
     """Handles processing of RESP commands."""
     command_parts = parse_command(resp)
     if len(command_parts) == 0:
@@ -134,8 +133,9 @@ def handle_command(resp: str, conn, address):
     elif command == "set" :
         px = int(arguments[3]) if (len(arguments) >= 4 and arguments[2].lower() == "px") else -1
         set_db_item(arguments[0], arguments[1], px)
-        conn.send(encode_message(["OK"], "simple"))
         propagate_command(resp)
+        if not silentMode:
+            conn.send(encode_message(["OK"], "simple"))
     elif command == "get" :
         value = get_db_item(arguments[0])
         conn.send(encode_message([value[0]] if value else [], "bulk"))
@@ -229,21 +229,75 @@ def connect_to_master(host: str, host_port: int, self_port: int):
         print(f"Error connecting to master: {e}")
         return None;
 
+def split_commands(buffer):
+    """Split a chunk of RESP commands into individual commands, returning remaining buffer."""
+    commands = []
+    i = 0  # Start of the current command
+    while i < len(buffer):
+        # Look for the end of the command
+        end_of_command_idx = buffer.find('\r\n', i)
+        if end_of_command_idx == -1:
+            break  # No complete command found
+
+        num_args_start = i + 1  # Skip '*'
+        num_args_end = end_of_command_idx
+        try:
+            num_args = int(buffer[num_args_start:num_args_end])
+        except ValueError:
+            break  # Malformed command
+
+        i = end_of_command_idx + 2  # Move past \r\n
+        command = buffer[num_args_start - 1:end_of_command_idx + 2]  # Include *<num_args>\r\n
+
+        for _ in range(num_args):
+            if i >= len(buffer):
+                break  # Command exceeds buffer length
+
+            arg_length_idx = buffer.find('\r\n', i)
+            if arg_length_idx == -1:
+                break  # No complete argument found
+
+            arg_length_start = i + 1  # Skip '$'
+            arg_length_end = arg_length_idx
+            try:
+                arg_length = int(buffer[arg_length_start:arg_length_end])
+            except ValueError:
+                break  # Malformed command
+
+            arg_start = arg_length_idx + 2
+            arg_end = arg_start + arg_length
+            if arg_end > len(buffer) or buffer[arg_end:arg_end+2] != '\r\n':
+                break  # Incomplete argument
+
+            command += buffer[i:arg_end + 2]  # Include $<length>\r\n<arg>\r\n
+            i = arg_end + 2  # Move past this argument
+
+        if i > len(buffer):
+            break  # Partial command at the end of the buffer
+
+        commands.append(command)
+
+    return commands, buffer[i:]  # Return commands and the remaining buffer
+
 def start_replication(host: str, host_port: int, self_port: int):
     """Start connection with the master."""
-
     try:
         sock = connect_to_master(host, host_port, self_port)
         print(f"Replica ready...")
+        buffer = ""
         while sock:
             ready_to_read, _, _ = select.select([sock], [], [], 5)
             if ready_to_read:
                 response = sock.recv(4096)
                 if not response:
                     break  # Connection closed by the master
-                print(f'Received from Master: {response}')
-                handle_command(response.decode("utf-8"), sock, (host, host_port))
-            # Implement heartbeat here, if necessary
+                buffer += response.decode("utf-8")
+                
+                # Attempt to split and process commands if complete ones are available
+                commands, buffer = split_commands(buffer)
+                for cmd in commands:
+                    handle_command(cmd, sock, (host, host_port), True)
+
     except Exception as e:
         print(f"Replication Ended")
         print(f"Error: {e}")
@@ -261,7 +315,6 @@ def main():
         replication["role"] = "slave"
         print(f"Configured as slave of: {master_host}:{master_port}")
         threading.Thread(target=start_replication, args=(master_host, int(master_port), int(port))).start()
-        # start_replication(master_host, int(master_port), int(port))
 
     with socket.create_server(("localhost", port), reuse_port=True) as server_socket:
         server_socket.listen()
