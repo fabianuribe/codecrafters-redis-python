@@ -3,7 +3,6 @@ import base64
 import socket
 import threading
 from datetime import datetime, timedelta
-import select
 import asyncio
 
 class Replica:
@@ -381,21 +380,19 @@ def start_replication(host: str, host_port: int, self_port: int):
         print(f"Replica ready...")
         buffer = ""
         while sock:
-            ready_to_read, _, _ = select.select([sock], [], [], 5)
-            if ready_to_read:
-                resp = sock.recv(1024)
-                print(f"Replication request: {resp}")
-                if not resp:
-                    break  # Connection closed by the master
-                buffer += resp.decode("utf-8")
-                
-                # Attempt to split and process commands if complete ones are available
-                commands, buffer = split_commands(buffer)
-                for cmd in commands:
-                    handle_command(cmd, sock, (host, host_port), True)
-                    num_bytes = len(cmd.encode("utf-8"))
-                    replication["master_repl_offset"] += num_bytes
-                    print(f"new offset {replication['master_repl_offset']}")
+            resp = sock.recv(1024)
+            print(f"Replication request: {resp}")
+            if not resp:
+                break  # Connection closed by the master
+            buffer += resp.decode("utf-8")
+
+            # Attempt to split and process commands if complete ones are available
+            commands, buffer = split_commands(buffer)
+            for cmd in commands:
+                handle_command(cmd, sock, (host, host_port), True)
+                num_bytes = len(cmd.encode("utf-8"))
+                replication["master_repl_offset"] += num_bytes
+                print(f"new offset {replication['master_repl_offset']}")
 
     except Exception as e:
         print(f"Replication Ended")
