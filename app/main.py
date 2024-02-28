@@ -2,7 +2,9 @@ import argparse
 import base64
 import socket
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime,  timedelta
+from time import sleep
+import select
 import asyncio
 
 class Replica:
@@ -20,6 +22,8 @@ replication = {
     "master_replid": "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
     "master_repl_offset": 0,
 }
+
+replication_lock = threading.Lock()
 
 def parse_command(command: str) -> list[str]:
     """Parses a Redis command and returns the components."""
@@ -89,7 +93,8 @@ def get_db_item(key) -> tuple | None:
 
 def get_replication_info() -> str:
     """Retrieves the instances replication information."""
-    return "\n".join(["# Replication"] +[f'{key}:{value}' for key, value in replication.items()])
+    with replication_lock:
+        return "\n".join(["# Replication"] +[f'{key}:{value}' for key, value in replication.items()])
 
 def register_replica(replica: Replica):
     """Registers a new replica"""
@@ -110,19 +115,19 @@ def propagate_command(command):
             except Exception as e:
                 print(f"Error propagating to {replica.host}:{replica.port} : {e}")
                 remove_replica(replica)
-        print(f"Propagating complete!.")
+        print(f"Propagating complete!")
 
 async def check_replica(replica, master_offset, timeout):
     """Asynchronously check if a replica is up-to-date within a given timeout."""
     start_time = asyncio.get_event_loop().time()
     print(f"Checking replica {replica.host}:{replica.port} {replica.offset} -> {master_offset}")
 
-    current_time = asyncio.get_event_loop().time()
     # Trigger the REPLCONF GETACK command without waiting for a direct response
     replica.connection.sendall(encode_message(["REPLCONF", "GETACK", "*"], "array"))
 
     try:
         while True:
+            current_time = asyncio.get_event_loop().time()
             if current_time - start_time >= timeout:
                 # Timeout reached, exit the loop
                 print(f"Timeout checking replica {replica.host}:{replica.port}")
@@ -161,8 +166,8 @@ async def wait_for_replicas_async(numreplicas: int, timeout: int) -> int:
                 break
 
     # Cancel any pending tasks if we reached our goal early
-    # for task in pending:
-    #     task.cancel()
+    for task in pending:
+        task.cancel()
 
     return confirmed_replicas
 
@@ -214,18 +219,36 @@ def handle_command(resp: str, conn, address, silentMode=False):
     elif command == "echo" :
         conn.send(encode_message(arguments, "bulk"))
     elif command == "set" :
-        px = int(arguments[3]) if (len(arguments) >= 4 and arguments[2].lower() == "px") else -1
-        set_db_item(arguments[0], arguments[1], px)
-        propagate_command(resp)
-        if not silentMode:
-            replication["master_repl_offset"] += len(resp)
-            conn.sendall(encode_message(["OK"], "simple"))
+        try:
+            replication_lock.acquire()
+            print("SET acquired lock")
+
+            px = int(arguments[3]) if (len(arguments) >= 4 and arguments[2].lower() == "px") else -1
+            set_db_item(arguments[0], arguments[1], px)
+
+            if replication["role"] == "master":
+                propagate_command(resp)
+            if not silentMode:
+                replication["master_repl_offset"] += len(resp)
+                conn.sendall(encode_message(["OK"], "simple"))
+        finally:
+            replication_lock.release()
+            print("SET released lock")
     elif command == "wait":
-        count = int(arguments[0]) if len(arguments) else 0
-        timeout = int(arguments[1]) if len(arguments) else 0
-        confirmed_replicas = wait_for_replicas(count, int(timeout))
-        print(f"confirmed replicas: {confirmed_replicas}")
-        conn.send(encode_message([str(confirmed_replicas)], "integer"))
+        # Acquire the lock before waiting for replicas
+        replication_lock.acquire()
+        print("WAIT acquired lock")
+        try:
+            count = int(arguments[0]) if len(arguments) else 0
+            timeout = int(arguments[1]) if len(arguments) else 0
+            confirmed_replicas = wait_for_replicas(count, int(timeout))
+            print(f"confirmed replicas: {confirmed_replicas}")
+            conn.send(encode_message([str(confirmed_replicas)], "integer"))
+        finally:
+
+            # Release the lock after waiting for replicas
+            replication_lock.release()
+            print("WAIT released lock")
     elif command == "get" :
         value = get_db_item(arguments[0])
         conn.send(encode_message([value[0]] if value else [], "bulk"))
@@ -380,19 +403,21 @@ def start_replication(host: str, host_port: int, self_port: int):
         print(f"Replica ready...")
         buffer = ""
         while sock:
-            resp = sock.recv(1024)
-            print(f"Replication request: {resp}")
-            if not resp:
-                break  # Connection closed by the master
-            buffer += resp.decode("utf-8")
+            ready_to_read, _, _ = select.select([sock], [], [], 5)
+            if ready_to_read:
+                resp = sock.recv(1024)
+                print(f"Replication request: {resp}")
+                if not resp:
+                    break  # Connection closed by the master
+                buffer += resp.decode("utf-8")
 
-            # Attempt to split and process commands if complete ones are available
-            commands, buffer = split_commands(buffer)
-            for cmd in commands:
-                handle_command(cmd, sock, (host, host_port), True)
-                num_bytes = len(cmd.encode("utf-8"))
-                replication["master_repl_offset"] += num_bytes
-                print(f"new offset {replication['master_repl_offset']}")
+                # Attempt to split and process commands if complete ones are available
+                commands, buffer = split_commands(buffer)
+                for cmd in commands:
+                    handle_command(cmd, sock, (host, host_port), True)
+                    num_bytes = len(cmd.encode("utf-8"))
+                    replication["master_repl_offset"] += num_bytes
+                    print(f"new offset {replication['master_repl_offset']}")
 
     except Exception as e:
         print(f"Replication Ended")
@@ -413,9 +438,12 @@ def main():
         threading.Thread(target=start_replication, args=(master_host, int(master_port), int(port))).start()
 
     with socket.create_server(("localhost", port), reuse_port=True) as server_socket:
+        # if len(replicas) > 0 and replication["role"] == "master":
         server_socket.listen()
         print(f"Server listening on localhost:{port}")
         while True:
+            if replication["role"] == "slave":
+                sleep(1)
             conn, address = server_socket.accept()
             threading.Thread(target=handle_client_connection, args=(conn, address)).start()
 
