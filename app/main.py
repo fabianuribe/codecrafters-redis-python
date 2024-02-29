@@ -91,6 +91,14 @@ def get_db_item(key) -> tuple | None:
     """Retrieves an item from the database if not expired."""
     return db[key] if key in db and not is_expired(db[key]) else None
 
+def del_db_item(key: str) -> int:
+    """Deletes an item in the database."""
+    if key in db:
+        del db[key]
+        return 1
+    else:
+        return 0
+
 def get_replication_info() -> str:
     """Retrieves the instances replication information."""
     with replication_lock:
@@ -234,6 +242,11 @@ def handle_command(resp: str, conn, address, silentMode=False):
         finally:
             replication_lock.release()
             print("SET released lock")
+    elif command == "del":
+        delete_count = 0
+        for key in arguments:
+            delete_count += del_db_item(key)
+        conn.send(encode_message([str(delete_count)], "integer"))
     elif command == "wait":
         # Acquire the lock before waiting for replicas
         replication_lock.acquire()
