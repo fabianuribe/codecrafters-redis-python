@@ -212,7 +212,7 @@ def handle_command(resp: str, conn, address, silentMode=False):
         elif arguments[0].lower() == "ack":
             print(f"UPDATING REPLICA OFFSET {address}")
             update_replicas_offset(address[0], address[1], int(arguments[1]))
-            conn.send(encode_message(["OK"], "simple"))
+            # conn.send(encode_message(["OK"], "simple"))
         elif arguments[0].lower() == "listening-port":
             register_replica(Replica(host=address[0], port=int(address[1]), connection=conn, offset=0))
             conn.send(encode_message(["OK"], "simple"))
