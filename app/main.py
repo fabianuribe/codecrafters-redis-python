@@ -22,6 +22,7 @@ replication = {
     "master_replid": "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
     "master_repl_offset": 0,
 }
+config = {}
 
 replication_lock = threading.Lock()
 
@@ -224,13 +225,19 @@ def handle_command(resp: str, conn, address, silentMode=False):
     elif command == "info" :
         if len(arguments) and arguments[0].lower() == "replication":
             conn.send(encode_message([get_replication_info()], "bulk"))
+    elif command == "config":
+        if len(arguments) and arguments[0].lower() == "get":
+            configValue = config.get(arguments[1]) if (arguments[1] in config) else None
+            if configValue:
+                conn.send(encode_message([arguments[1], configValue], "array"))
+            else:
+                conn.send(encode_message([arguments[1], ""], "array"))
+
     elif command == "echo" :
         conn.send(encode_message(arguments, "bulk"))
     elif command == "set" :
         try:
             replication_lock.acquire()
-            print("SET acquired lock")
-
             px = int(arguments[3]) if (len(arguments) >= 4 and arguments[2].lower() == "px") else -1
             set_db_item(arguments[0], arguments[1], px)
 
@@ -241,7 +248,6 @@ def handle_command(resp: str, conn, address, silentMode=False):
                 conn.sendall(encode_message(["OK"], "simple"))
         finally:
             replication_lock.release()
-            print("SET released lock")
     elif command == "del":
         delete_count = 0
         for key in arguments:
@@ -250,7 +256,6 @@ def handle_command(resp: str, conn, address, silentMode=False):
     elif command == "wait":
         # Acquire the lock before waiting for replicas
         replication_lock.acquire()
-        print("WAIT acquired lock")
         try:
             count = int(arguments[0]) if len(arguments) else 0
             timeout = int(arguments[1]) if len(arguments) else 0
@@ -258,10 +263,8 @@ def handle_command(resp: str, conn, address, silentMode=False):
             print(f"confirmed replicas: {confirmed_replicas}")
             conn.send(encode_message([str(confirmed_replicas)], "integer"))
         finally:
-
             # Release the lock after waiting for replicas
             replication_lock.release()
-            print("WAIT released lock")
     elif command == "get" :
         value = get_db_item(arguments[0])
         conn.send(encode_message([value[0]] if value else [], "bulk"))
@@ -440,9 +443,17 @@ def main():
     parser = argparse.ArgumentParser(description='Example script to take a port argument.')
     parser.add_argument('--port', type=int, help='The port number to use.', default=6379)
     parser.add_argument('--replicaof', type=str, nargs=2, help='The master host and master port for the replica.')
+    parser.add_argument('--dir', type=str, help='The directory where RDB files are stored.')
+    parser.add_argument('--dbfilename', type=str, help='The name of  the RDB file.')
 
     args = parser.parse_args()
     port = args.port or 6379
+
+    if args.dir:
+        config["dir"] = args.dir
+
+    if args.dbfilename:
+        config["dbfilename"] = args.dbfilename
 
     if args.replicaof:
         master_host, master_port = args.replicaof
