@@ -92,6 +92,10 @@ def get_db_item(key) -> tuple | None:
     """Retrieves an item from the database if not expired."""
     return db[key] if key in db and not is_expired(db[key]) else None
 
+def get_db_keys() -> list[str]:
+    """Retrieves the keys from the database"""
+    return list(db.keys())
+
 def del_db_item(key: str) -> int:
     """Deletes an item in the database."""
     if key in db:
@@ -185,6 +189,7 @@ def wait_for_replicas(numreplicas: int, timeout: int) -> int:
     return asyncio.run(wait_for_replicas_async(numreplicas, timeout))
 
 def update_replicas_offset(host: str, port: int, offset: int):
+    """Updates the tracked byte offset for a given replica"""
     replica = next((replica for replica in replicas if replica.host == host and replica.port == port), None)
 
     if replica:
@@ -232,7 +237,8 @@ def handle_command(resp: str, conn, address, silentMode=False):
                 conn.send(encode_message([arguments[1], configValue], "array"))
             else:
                 conn.send(encode_message([arguments[1], ""], "array"))
-
+    elif command == "keys":
+        conn.send(encode_message(get_db_keys(), "array"))
     elif command == "echo" :
         conn.send(encode_message(arguments, "bulk"))
     elif command == "set" :
